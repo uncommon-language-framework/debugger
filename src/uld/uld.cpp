@@ -110,18 +110,19 @@ bool process_command()
 					for (const auto& type_entry : entry.second->types)
 					{
 						std::cout << api->GetDisplayNameOf(type_entry.second) << " (" << entry.first << ")\n";
-					}
 
-					loaded_types+=1;
+						loaded_types+=1;
+					}
 				}
 				else
 				{
 					for (const auto& type_entry : entry.second->types)
 					{
 						std::cout << "(not fully loaded) " << api->GetDisplayNameOf(type_entry.second) << " (" << entry.first << ")\n";
-					}
 
-					read_types+=1;
+						read_types+=1;
+
+					}
 				}
 			}
 
