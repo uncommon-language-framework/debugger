@@ -1,5 +1,6 @@
 #include <StdULR.hpp>
 #include <iostream>
+#include <sstream>
 #include <vector>
 #include <memory>
 #include <windows.h>
@@ -11,20 +12,89 @@
 
 ULRAPIImpl* api;
 
+std::string& escape_string(std::string& str)
+{
+	size_t pos = 0;
+
+	std::string_view replace_with("\\\"");
+
+	while ((pos = str.find('"', pos)) != std::string::npos)
+	{
+		str.replace(pos, 1, replace_with);
+
+		pos+=replace_with.length();
+	}
+
+	str.insert(str.begin(), '"');
+	str.push_back('"');
+
+	return str;
+}
+
+std::string repr_object(char* obj)
+{
+	std::stringstream out;
+	
+	Type* type = api->GetTypeOf(obj);
+
+	out << api->GetDisplayNameOf(type);
+
+	if (type == api->GetType("[System]String"))
+	{
+		// extract cstr
+
+		int len = *((int*) (obj+sizeof(Type*)));
+
+		std::string cstr(obj+sizeof(Type*)+sizeof(int), len);
+
+		escape_string(cstr);
+
+		out << ' ' << cstr;
+	}
+	else if (type->decl_type == TypeType::ArrayType)
+	{
+		out << " { ";
+
+		int len =  *((int*) (obj+sizeof(Type*)));
+
+		if (IsBoxableStruct(type->element_type))
+		{
+			for (int i = 0; i < len; i++)
+			{
+				out << api->GetDisplayNameOf(type->element_type);
+
+				if (i != len-1) out << ", ";
+			}
+		}
+		else
+		{
+			char** ptrbase = (char**) (obj+sizeof(Type*)+sizeof(int));
+
+			for (int i = 0; i < len; i++)
+			{
+				out << api->GetDisplayNameOf(api->GetTypeOf(ptrbase[i])) << " @ " << (void*) (ptrbase[i]);
+
+				if (i != len-1) out << ", ";
+			}
+		}
+
+		out << " }";
+	}
+
+	return out.str();
+}
+
 std::vector<std::string> split_command(std::string command)
 {
 	std::vector<std::string> parts;
 
-	size_t start = -1;
-
-	do
+	std::string part;
+	std::istringstream stream(command);
+	
+	while (std::getline(stream, part, ' '))
 	{
-		size_t found = command.find(' ', start+1);
-
-		parts.push_back(command.substr(start+1, found));
-
-		start = found;
-	} while (start < command.size());
+		parts.push_back(part);
+	}
 
 	return parts;
 }
@@ -56,17 +126,30 @@ bool process_command()
 		}
 
 		if ((parts[1] == "allocated") || (parts[1] == "alloc") || (parts[1] == "alloced"))
-		{			
+		{
+			std::map<Type*, size_t> alloced_per_type;
+
 			for (const auto& entry : api->allocated_objs)
 			{
-				std::cout << api->GetDisplayNameOf(api->GetTypeOf(entry.first)) << " (" << entry.second << " bytes)\n";
+				Type* type = api->GetTypeOf(entry.first);
+
+				std::cout << api->GetDisplayNameOf(type) << " @ " << ((void*) entry.first) << " (" << entry.second << " bytes)\n";
+
+				alloced_per_type[type]+=entry.second;
+			}
+
+			std::cout << "\nPer-Type Breakdown:\n";
+
+			for (const auto& entry : alloced_per_type)
+			{
+				std::cout << api->GetDisplayNameOf(entry.first) << ": " << entry.second << " bytes\n";
 			}
 
 			std::cout << api->allocated_objs.size() << " objects, " << api->allocated_size << " bytes allocated total.\n\n";
 
 			for (void* addr : api->allocated_field_offsets)
 			{
-				std::cout << addr << " also allocated as a runtime generic static field offset\n";
+				std::cout << addr << " also allocated as a runtime generic static field offset for " << api->GetDisplayNameOf(api->ResolveAddressToMember(addr)) << '\n';
 			}
 
 			return true;
@@ -129,6 +212,85 @@ bool process_command()
 			std::cout << read_types << " read, " << loaded_types << " loaded, " << read_types+loaded_types << " total.\n";
 
 			return true;
+		}
+
+		if ((parts[1] == "object") || (parts[1] == "obj"))
+		{
+			if (parts.size() < 3)
+			{
+				std::cerr << "Must supply the object pointer!\n";
+				return true;
+			}
+
+			char* obj;
+
+			try
+			{
+				obj = (char*) std::stoull(parts[2], nullptr, 16);
+			}
+			catch (std::invalid_argument& e)
+			{
+				std::cerr << "Invalid object pointer!\n";
+				return true;			
+			}
+
+			if (api->allocated_objs.count(obj) == 0)
+			{
+				std::cerr << parts[2] << " does not point to a valid ULR object!\n";
+				return true;
+			}
+
+			std::cout << repr_object(obj) << '\n';
+
+			return true;
+		}
+
+		if ((parts[1] == "fields") || (parts[1] == "flds") || (parts[1] == "field") || (parts[1] == "fld"))
+		{
+			if (parts.size() < 3)
+			{
+				std::cerr << "Must supply the object pointer!\n";
+				return true;
+			}
+
+			char* obj;
+
+			try
+			{
+				obj = (char*) std::stoull(parts[2], nullptr, 16);
+			}
+			catch (std::invalid_argument& e)
+			{
+				std::cerr << "Invalid object pointer!\n";
+				return true;			
+			}
+
+			if (api->allocated_objs.count(obj) == 0)
+			{
+				std::cerr << parts[2] << " does not point to a valid ULR object!\n";
+				return true;
+			}
+
+			Type* type = api->GetTypeOf(obj);
+
+			std::cout << api->GetDisplayNameOf(type);
+
+			for (auto& entry : type->inst_attrs)
+			{
+				if (entry.second[0]->decl_type == MemberType::Field)
+				{
+					std::cout << entry.first << ": " << repr_object(obj) << '\n';
+				}
+			}
+
+			std::cout << '\n';
+
+			return true;
+		}
+
+		if ((parts[1] == "bt") || (parts[1] == "backtrace") || (parts[1] == "stacktrace") || parts[1] == "stack")
+		{
+			std::cout << api->GetStackTrace(1) << '\n';
 		}
 	}
 
