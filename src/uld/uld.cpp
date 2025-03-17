@@ -116,6 +116,24 @@ bool process_command()
 
 	if ((parts[0] == "exit") || (parts[0] == "quit") || (parts[0] == "q"))
 		exit(0);
+
+	if (parts[0] == "help")
+	{
+		std::cout << "Available Commands:\n"
+			"[[c]ont]inue -> resume execution\n"
+			"[q]uit/exit -> exit the program\n"
+			"[p]rint -> print data (shown below)\n"
+			"        [alloc]ated/alloced -> active ULR objects\n"
+			"        [asm]s/assembly/assemblies -> loaded ULR assemblies\n"
+			"        [type]s -> loaded ULR types\n"
+			"        [obj]ect <hex-obj-ptr> -> arbitrary ULR object\n"
+			"        [field]s/[fld]s <hex-obj-ptr> -> fields of arbitrary ULR object\n"
+			"        [method]s/[meth]s <hex-obj-ptr> -> methods of arbitrary ULR object\n"
+			"        [cfield]s/[cfld]s <hex-obj-ptr> -> fields of arbitrary ULR class\n"
+			"        [cmethod]s/[cmeth]s <hex-obj-ptr> -> methods of arbitrary ULR class\n"
+			"        bt/backtrace/stacktrace/stack -> ULR stack trace\n";
+		return true;
+	}
 	
 	if ((parts[0] == "print") || (parts[0] == "p"))
 	{
@@ -160,9 +178,9 @@ bool process_command()
 			size_t read_asms = 0;
 			size_t loaded_asms = 0;
 
-			for (const auto& entry : *api->read_assemblies)
+			for (const auto& entry : api->loader->ReadAssemblies)
 			{
-				if (api->assemblies->count(entry.first))
+				if (api->loader->LoadedAssemblies.count(entry.first))
 				{
 					std::cout << entry.first << " (" << entry.second->types.size() << " types)\n";
 				
@@ -186,9 +204,9 @@ bool process_command()
 			size_t read_types = 0;
 			size_t loaded_types = 0;
 
-			for (const auto& entry : *api->read_assemblies)
+			for (const auto& entry : api->loader->ReadAssemblies)
 			{
-				if (api->assemblies->count(entry.first))
+				if (api->loader->LoadedAssemblies.count(entry.first))
 				{
 					for (const auto& type_entry : entry.second->types)
 					{
@@ -273,13 +291,13 @@ bool process_command()
 
 			Type* type = api->GetTypeOf(obj);
 
-			std::cout << api->GetDisplayNameOf(type);
+			std::cout << api->GetDisplayNameOf(type) << '\n';
 
 			for (auto& entry : type->inst_attrs)
 			{
 				if (entry.second[0]->decl_type == MemberType::Field)
 				{
-					std::cout << entry.first << ": " << repr_object(obj) << '\n';
+					std::cout << entry.first << ": " << repr_object((char*) ((FieldInfo*) entry.second[0])->GetValue(obj)) << '\n';
 				}
 			}
 
@@ -288,6 +306,115 @@ bool process_command()
 			return true;
 		}
 
+		if ((parts[1] == "cfields") || (parts[1] == "cflds") || (parts[1] == "cfield") || (parts[1] == "cfld"))
+		{
+			if (parts.size() < 3)
+			{
+				std::cerr << "Must supply the type name!\n";
+				return true;
+			}
+
+			Type* type = api->GetType(parts[2]);
+
+			if (type == nullptr)
+			{
+				std::cerr << "'" << parts[2] << "' is not a valid ULR type\n";
+				return true;
+			}
+
+			std::cout << api->GetDisplayNameOf(type) << '\n';
+
+			for (auto& entry : type->static_attrs)
+			{
+				if (entry.second[0]->decl_type == MemberType::Field)
+				{
+					std::cout << entry.first << ": " << repr_object((char*) ((FieldInfo*) entry.second[0])->GetValue(nullptr)) << '\n';
+				}
+			}
+
+			std::cout << '\n';
+
+			return true;
+		}
+
+		if ((parts[1] == "methods") || (parts[1] == "meths") || (parts[1] == "method") || (parts[1] == "meth"))
+		{
+			if (parts.size() < 3)
+			{
+				std::cerr << "Must supply the object pointer!\n";
+				return true;
+			}
+
+			char* obj;
+
+			try
+			{
+				obj = (char*) std::stoull(parts[2], nullptr, 16);
+			}
+			catch (std::invalid_argument& e)
+			{
+				std::cerr << "Invalid object pointer!\n";
+				return true;			
+			}
+
+			if (api->allocated_objs.count(obj) == 0)
+			{
+				std::cerr << parts[2] << " does not point to a valid ULR object!\n";
+				return true;
+			}
+
+			Type* type = api->GetTypeOf(obj);
+
+			std::cout << api->GetDisplayNameOf(type) << '\n';
+
+			for (auto& entry : type->inst_attrs)
+			{
+				if (entry.second[0]->decl_type == MemberType::Method)
+				{
+					auto method = ((MethodInfo*) entry.second[0]);
+					
+					std::cout << internal_api->GetDisplayNameOf(method) << " @ " << method->offset << '\n';
+				}
+			}
+
+			std::cout << '\n';
+
+			return true;
+		}
+
+		if ((parts[1] == "cmethods") || (parts[1] == "cmeths") || (parts[1] == "cmethod") || (parts[1] == "cmeth"))
+		{
+			if (parts.size() < 3)
+			{
+				std::cerr << "Must supply the type name!\n";
+				return true;
+			}
+
+			Type* type = api->GetType(parts[2]);
+
+			if (type == nullptr)
+			{
+				std::cerr << "'" << parts[2] << "' is not a valid ULR type\n";
+				return true;
+			}
+
+			std::cout << api->GetDisplayNameOf(type) << '\n';
+
+			for (auto& entry : type->static_attrs)
+			{
+				if (entry.second[0]->decl_type == MemberType::Method)
+				{
+					auto method = ((MethodInfo*) entry.second[0]);
+					
+					std::cout << internal_api->GetDisplayNameOf(method) << " @ " << method->offset << '\n';
+				}
+			}
+
+			std::cout << '\n';
+
+			return true;
+		}
+	
 		if ((parts[1] == "bt") || (parts[1] == "backtrace") || (parts[1] == "stacktrace") || parts[1] == "stack")
 		{
 			std::cout << api->GetStackTrace(1) << '\n';
